@@ -146,7 +146,7 @@
 - Stage 1：读 dcache data
 - Stage 2：获得读结果，选择并写回
 
-​		在 stage 2 之后, 还会有一个额外的 stage 处理 stage 2 来不及完成的状态的更新。
+​		在 Stage 2 之后, 还会有一个额外的 stage 处理 stage 2 来不及完成的状态的更新。
 
 **Store**：对于store指令，分为两个部分：一个是地址计算部分Sta，另一个是数据流水线Std。Sta会经历四个状态：
 
@@ -235,3 +235,25 @@
 ​		遇到了TLB Miss等问题时，处理的方法和Load Pipeline类似。
 
 ​		TLB为全相联，32项4KB Page，4项2MB &1GB Page，ITLB（指令快表）采用PLRU替换策略，DTLB（数据快表）采用随机替换策略
+
+#### 原子指令
+
+​		香山处理器的原子指令由一个单独的有限状态机负责控制执行。在南湖架构中，一条原子指令会经历一系列状态，我们在此处不多加赘述。
+
+​		香山处理器的原子指令都是在D-Cache执行的，D-Cache使用主流水线执行原子指令，同时维护一个MissQueue用于记录Miss的原子指令，并在合适的时候将其重新发设执行。
+
+​		除此之外，香山处理器还对RISC-V中的lr/sc指令也有特殊的支持，~~由于我看不懂，~~此处不多过多的介绍。
+
+#### Load Queue and Store Queue
+
+​		Load Queue是一个80项循环队列，每周期可以从外部接受指令、指令结果、Refill结果等并更新自身状态，也可以写回至多两条Miss的load指令（已得到Refill的结果）。Load Queue的每一项都包含**物理地址、虚拟地址、重填数据项、状态位**等信息，用于记录load的状态。另外，Load指令进入Load Queue需要分两步完成，首先是提前分配enqPtr，然后则是实际写入Load Queue，这是因为Dispatch模块距离MemBlock较远，故而将分配逻辑前置。
+
+​		**何时更新Load Queue？**首先，我们可以在Stage 2进行更新。前面在介绍Load Pipeline的时候也提到了，Stage 2会产生D-Cache的结果和转发的结果，故而可以据此更新Load Queue。Stage 3也是一个可以更新队列的阶段，部分上一个周期未能完成的检查结果在此阶段可以反馈，并且会提供给Load Queue来更新状态。
+
+​		**Load Refill是和Load Queue相关的又一个重要的事件。**分配到MSHR的load指令会在Load Queue中继续侦听D-Cache的Refill结果，一次Refill的结果会被等待其的所有Load Queue捕获，并且这些数据会被标识为有效且可写回。Load Queue也可以合并Refill和转发的结果。Load Queue可根据策略写回Miss的load指令，并同Load Pipeline中正常执行的load指令争用写回端口。
+
+​		**load指令取得结果，写回ROB和RF后就完成了。**写回的load指令可以从Load Queue出发，也可以直接从流水线写回。ROB在load指令提交后，会产生信号通知Load Queue提交成功指令的数量。Load Queue可以据此更新队列内容和队尾指针。
+
+​		**重定向**（这一部分目前不是很明白，日后可能会补充）
+
+​		**违例检查。**首先是Store-Load违例检查，在向Store Queue中写入地址的同时，也会在Load Queue中搜索物理地址相同但逻辑上应该在store后的load指令，倘若这些指令已经被执行了，那么就产生了Store-Load违例，Load Queue会发送重定向请求，重新执行违例的指令序列。Load-Load也有相同的违例检查机制，此出现不多赘述。

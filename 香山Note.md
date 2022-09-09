@@ -257,3 +257,29 @@
 ​		**重定向**（这一部分目前不是很明白，日后可能会补充）
 
 ​		**违例检查。**首先是Store-Load违例检查，在向Store Queue中写入地址的同时，也会在Load Queue中搜索物理地址相同但逻辑上应该在store后的load指令，倘若这些指令已经被执行了，那么就产生了Store-Load违例，Load Queue会发送重定向请求，重新执行违例的指令序列。Load-Load也有相同的违例检查机制，此出现不多赘述。
+
+​		Store是用于维护Store Pipeline的另一个队列，包括六十四项，同样，也可以每周期从Dispatch接受四条指令、从Sta和Std接受两条指令的数据和地址、写入Commited Store Buffer。和Load Queue相同，Store Queue中的每一项也记录了物理地址、虚拟地址、数据等信息。除此之外，Store Queue也能在不同的流水级被更新，也具有重定向等机制。其大部分内容和Load Queue都很相似
+
+​		Commited Store Buffer是Store Pipeline中一个比较独特的部件。
+
+### ?.MMU
+
+![mmu-overall](https://xiangshan-doc.readthedocs.io/zh_CN/latest/figs/memblock/mmu-overall.png)
+
+​		香山的MMU包括包含TLB，L2TLB，Repeater，PMP和PMA等。MMU负责将进程的虚拟地址映射到物理地址，并使用物理地址进行访存。
+
+​		香山处理器的MMU支持Sv39分页机制，虚拟地址长度为39位，其中页内偏移12位，三级页表27 = 3 * 9位，支持页表缓存。香山的MMU中，和流水线紧耦合的分别是ITLB和DTLB，需要考虑他们和流水线的时序关系。ITLB和DTLB如果Miss，就会发送请求到L2 TLB；倘若L2 TLB也Miss，那么就会使用Hardware Page Table Walker去访问内存中的页表内容。L2 TLB主要考虑是如何提高并行度和过滤重复的请求。Repeater是一级TLB到 L2 TLB的请求缓冲。PMP和PMA 需要对所有的物理地址访问进行权限检查。
+
+#### TLB
+
+​		香山的TLB可修改组织结构（相联模式、替换策略等），默认为ITLB 32项普通页和4项大页，全相联，伪LRU替换；DTLB为128项普通页直接相联，8项全相联负责所有大小的页面，替换策略同ITLB。
+
+​		DTLB非阻塞，Miss则需要从访存单元重新发送请求；ITLB实现了简单的阻塞式设计。
+
+#### L2 TLB
+
+​		这是一个更大的缓存单元，由ITLB和DTLB共享，分为Page Cache、Page Walker等部分。
+
+​		一级TLB的请求首先会发送给Page Cache，若命中，则会返回给上一级TLB；倘若Miss且Page Walker空闲，该请求进入Page Walker，否则进入Miss Queue。Page Cache缓存了三级页表，并且支持ecc校验。
+
+​		Page Walker接收了请求后（一次只能处理一个请求），进行Hardware Page Table Walk，且Page Walker只会访问1GB和4MB的页表，4KB页表的访问由Miss Queue承担。Page Walker如果访问到大页或空页，则会返回给一级TLB，否则会将请求送往Miss Queue。
